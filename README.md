@@ -1,4 +1,4 @@
-# 奧特曼揭牌抽籤 (Ultraman Tear-the-Paper Lottery)
+# random_work — 奧特曼揭牌抽籤
 
 A fully static children's-artwork lottery website with an Ultraman "tear the paper"
 reveal theme. **No backend** — pure HTML / CSS / JS, ready to deploy to **GitHub Pages**.
@@ -12,6 +12,8 @@ reveal theme. **No backend** — pure HTML / CSS / JS, ready to deploy to **GitH
   revealing the next sheet; the rhythm slows down, pauses with a tense jitter, and a heavy
   final rip reveals the **uniformly random** winner. Only then does the gold **🏆 中籤！**
   badge pop and the name fade in (no spoiler while cycling).
+- When the winner badge appears, `sound/歡呼聲.mp3` plays once. Starting another draw or resetting stops the previous cheer. Audio is unlocked by the start-button gesture, and an audio failure does not block the draw.
+- Each paper pull plays `sound/paper.mp3` in time with the arm. The winner reveal adds three bursts of colorful confetti that fall and disappear after roughly 3.5 seconds. Restart/reset clears all effects; reduced-motion mode skips the flying confetti.
 - Press **重置** to put the cover sheet back (disabled — and visibly greyed — while a draw is running).
 - All artworks are preloaded on page load; the start button is disabled until they finish.
 
@@ -22,23 +24,28 @@ avoid modulo bias), falling back to `Math.random` if unavailable.
 - `index.html` — markup, with a CSP meta and `X-Content-Type-Options: nosniff`
 - `styles.css` — dark sci-fi theme, gold accents, percentage-positioned panel, mobile layout
 - `app.js` — artwork list + tear-off animation (Web Animations API) + draw/reveal logic
-- `hero-nohand-lower.webp` — main backdrop (desktop): Ultraman left of the board, with his lower (reaching) hand removed; the upper hand holding the board stays in the picture
-- `hero-mobile-nohand-lower.webp` — 600×540 crop for narrow screens (≤640px): face + reaching arm, hand removed
-- `lower-hand.webp` — cut-out lower hand overlaid on the backdrop; on every tear it lifts (−16°, final −20°) → yanks down (+28°, final +35°, dropping 6% of its width, final 8%) → springs back (−5°) around the wrist, in sync with the paper, which is pulled from the middle of its left edge and flung down-left. Static under `prefers-reduced-motion`.
+- `hero-clean-plate.png` — background with the drawing arm removed and torso/background reconstructed using built-in image generation (see `ASSETS.md`).
+- `hero-nohand-lower.webp` — original image, reused through SVG clip paths for the upper arm and forearm textures.
+- `lower-hand.webp` — original hand texture, attached to the forearm; it no longer rotates on its own.
+- The SVG hierarchy in `index.html` rotates the whole arm about the shoulder `(127, 267)`, with a second joint at the elbow `(173, 415)`. Normal pulls sweep from −12° to +27° at the shoulder, with a stronger final pull. All motion returns to the starting pose after the draw.
+- Desktop and mobile share the same source coordinates. Mobile uses the original 600×540 crop, with a 7° resting shoulder adjustment so the fingertips meet the card.
+- Paper follows the fingertip through the shoulder and elbow transforms until release. A draw takes approximately five seconds. Reduced-motion mode keeps the arm still.
 - Click the winning artwork to view it full-screen (click / Esc to close).
-- `artworks/art1-traffic.jpg`, `art2-star.jpg`, `art3-sweet.jpg` — three bundled artworks
-  (anonymized: nickname labels only, no full names / class numbers; EXIF stripped)
+- `artworks/` — 11 distinct artworks in the draw: the original three plus eight added works.
+  The original three have anonymized labels and masked name strips; the newly supplied images are used unchanged, with artwork titles or a file identifier as labels.
+  Duplicate versions remain in the folder but are excluded from `ARTWORKS`:
+  `558988_0.jpg` → `art1-traffic.jpg`, `558989_0.jpg` → `art2-star.jpg`,
+  `558992_0.jpg` → `art3-sweet.jpg`. These are visually the same works despite different file sizes/encodings.
 
 ## Accessibility & privacy
 - `aria-live` lives on the status line (`.hud`), not the fast-cycling panel.
 - `prefers-reduced-motion`: no tearing or shaking — the cover fades out, the winner fades in.
-- Artwork labels use nicknames only; source images have the handwritten name strip
-  masked and metadata removed.
+- Artwork labels use titles, original nicknames, or file identifiers. The original three images have the handwritten name strip masked and metadata removed; newly supplied files retain their original contents.
 
 ## Local preview
 ```bash
-cd ultraman-lottery
-python3 -m http.server 8799
+cd random_work
+python -m http.server 8799 --bind 127.0.0.1
 # open http://127.0.0.1:8799/
 ```
 

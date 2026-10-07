@@ -7,7 +7,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>奧特曼揭牌抽籤</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%8F%86%3C/text%3E%3C/svg%3E">
-<link rel="stylesheet" href="styles.css">
+<link rel="stylesheet" href="styles.css?v=7">
 </head>
 <body>
   <header class="topbar">
@@ -17,13 +17,30 @@
 
   <main class="wrap">
     <div class="herowrap">
-      <picture>
-        <source media="(max-width: 640px)" srcset="hero-mobile-nohand-lower.webp">
-        <img class="stageimg" src="hero-nohand-lower.webp" alt="奧特曼站在黑板旁">
-      </picture>
-      <!-- v5: the lower hand (chest height, reaching to the board) is a cut-out overlay; on every tear it lifts → swings down → springs back.
-           The upper hand holding the board stays still in the background. -->
-      <img class="hand" id="hand" src="lower-hand.webp" alt="" aria-hidden="true">
+      <div class="stage-backdrop">
+        <img class="stageimg" src="hero-clean-plate.png" width="1536" height="1024" alt="奧特曼站在黑板旁">
+      </div>
+      <!-- Original artwork clipped into a shoulder → elbow → palm hierarchy.
+           Both viewports use the same source coordinates, keeping joints attached. -->
+      <svg class="arm-rig" viewBox="0 0 1536 1024" aria-hidden="true" focusable="false">
+        <defs>
+          <clipPath id="upperArmClip" clipPathUnits="userSpaceOnUse">
+            <path d="M 73,263 C 76,233 95,211 125,211 C 153,209 175,230 181,263 L 185,324 C 183,348 189,373 201,397 L 221,431 L 191,461 C 163,456 139,447 124,426 C 106,400 91,359 82,322 C 76,301 70,279 73,263 Z"/>
+          </clipPath>
+          <clipPath id="forearmClip" clipPathUnits="userSpaceOnUse">
+            <path d="M 148,392 C 159,376 177,383 195,390 C 218,396 245,410 271,423 C 301,434 323,437 350,442 L 350,496 C 321,492 292,486 261,482 C 230,479 202,472 178,460 C 156,450 144,422 148,392 Z"/>
+          </clipPath>
+        </defs>
+        <g class="arm-home">
+        <g id="arm" class="arm-joint">
+          <image href="hero-nohand-lower.webp" width="1536" height="1024" clip-path="url(#upperArmClip)"/>
+          <g id="forearm" class="forearm-joint">
+            <image href="hero-nohand-lower.webp" width="1536" height="1024" clip-path="url(#forearmClip)"/>
+            <image href="lower-hand.webp" x="322" y="427" width="181" height="78"/>
+          </g>
+        </g>
+        </g>
+      </svg>
     </div>
 
     <!-- reveal panel positioned over the dark board of hero-nohand-lower.webp -->
@@ -54,6 +71,8 @@
     <div class="hud" id="hud" aria-live="polite" role="status">按下按鈕，看奧特曼替你撕牌抽籤！</div>
   </main>
 
+  <div id="confetti" class="confetti" aria-hidden="true" hidden></div>
+
   <!-- winner zoom (lightbox): opened by clicking the winning artwork, closed by click / Esc -->
   <div class="zoom" id="zoom" hidden role="dialog" aria-modal="true" aria-label="中籤作品放大" tabindex="-1">
     <img class="zoomimg" id="zoomImg" src="data:," alt="">
@@ -66,6 +85,6 @@
     <button class="btn ghost" id="resetBtn">重置</button>
   </div>
 
-  <script src="app.js"></script>
+  <script src="app.js?v=7"></script>
 </body>
 </html>

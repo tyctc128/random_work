@@ -26,20 +26,25 @@ body {
    (no page scrollbars flicker while it flies). */
 [hidden] { display: none !important; }
 .wrap { position: relative; width: 100%; max-width: 1200px; margin: 10px auto 0; overflow: hidden; }
-.stageimg { display: block; width: 100%; height: auto; border-radius: 10px; }
+.stage-backdrop { overflow: hidden; border-radius: 10px; }
+.stageimg { display: block; width: 100%; height: auto; aspect-ratio: 3 / 2; }
 
-/* v5: Ultraman's lower hand (chest height, reaching to the board), overlaid on hero-nohand-lower.webp at the exact spot it was cut from.
-   % of the hero image, so it scales with it. Pivot = wrist / thumb root (the arm is hidden
-   behind the board frame). z-order: hero < torn paper (≤15) < hand. */
+/* Original arm textures move as one shoulder/elbow hierarchy above the paper.
+   The clean plate underneath contains no fixed forearm. */
 .herowrap { position: relative; }
-.hand {
+.arm-rig {
   position: absolute;
-  left: 20.96%; top: 41.70%; width: 11.78%; height: auto;
-  transform-origin: 16.6% 54.5%;       /* v5: wrist = where the cuff meets the palm (cuff stays in the background) */
+  left: 0; top: 0; width: 100%; height: auto;
+  overflow: visible;
   z-index: 25;
   pointer-events: none;
+}
+.arm-joint, .forearm-joint {
+  transform-box: view-box;
   will-change: transform;
 }
+.arm-joint { transform-origin: 127px 267px; }
+.forearm-joint { transform-origin: 173px 415px; }
 
 /* reveal panel aligned to the blackboard inner frame of hero-nohand-lower.webp.
    --grip-x / --grip-y = where Ultraman's hand grips the top sheet (the tear pivot),
@@ -211,14 +216,13 @@ body {
 .btn:not(.ghost):disabled { border-width: 2px; }
 .btn:disabled:active { transform: none; }
 
-/* mobile (v5): hero-mobile-nohand-lower.webp is a 600×540 crop (face + reaching lower hand) of his upper body; the hand gripping
-   the board corner sits at the bottom-right of the image. The reveal card is laid
-   directly under the image so its top-right corner is right at his hand, and the tear
-   pivots under his fingertips (top edge ≈ 86%) and flings down-left toward his body. Buttons are sticky:
-   right under the card, pinned to the bottom only when the page is long. */
+/* Mobile: crop the same source stage to 600 × 540. Keep the animated SVG
+   outside the backdrop clip so the entire arm can reach down across the card. */
 @media (max-width: 640px) {
   body { padding-bottom: 12px; }
-  .hand { left: 53.67%; top: 79.07%; width: 30.17%; }
+  .arm-rig { width: 256%; }
+  .arm-home { transform-origin: 127px 267px; transform: rotate(7deg); }
+  .stage-backdrop { aspect-ratio: 600 / 540; border-radius: 0; }
   .wrap { max-width: 100%; }
   .herowrap {
     height: auto;
@@ -226,8 +230,8 @@ body {
     border-radius: 0;
   }
   .stageimg {
-    width: 100%; height: auto;
-    aspect-ratio: 600 / 540;            /* v5: new crop (face + the reaching lower hand) */            /* reserve space before the image loads (no layout jump) */
+    width: 256%; height: auto;
+    aspect-ratio: 3 / 2;              /* same 600 × 540 upper-left crop as the original */
     display: block;
     margin-top: 0;
     border-radius: 0;
@@ -237,10 +241,8 @@ body {
     left: auto; top: auto;
     width: calc(100% - 24px); max-width: 520px; height: auto;
     aspect-ratio: 4 / 3;
-    margin: -4px auto 6px;              /* card butts straight onto the bottom of the hero */
-    /* (old v3 note) hand ≈ x84% / y78% of the mobile hero → at 390px wide it is ≈ 20px above the
-       card's top edge at ≈ 85% across the card → pivot = card top-right ≈ 85% / 0% */
-    --grip-x: 86%;                      /* v5: right under his fingertips on the card's top edge */
+    margin: -10px auto 6px;              /* top edge meets the resting fingertips */
+    --grip-x: 79%;                      /* fingertip after the mobile 7° rest adjustment */
     --grip-y: 0%;
   }
   .panel-inner { border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,.5), inset 0 0 0 2px rgba(255,210,59,.1); }
@@ -271,6 +273,22 @@ body {
   background: rgba(0, 0, 0, .55); color: #ffe08a;
   font-size: clamp(10px, 1.1vw, 14px); font-weight: 700; letter-spacing: 1px;
   pointer-events: none;
+}
+.confetti {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 90;
+  contain: strict;
+}
+.confetti-piece {
+  position: absolute;
+  border-radius: 1px;
+  will-change: transform, opacity;
+}
+@media (prefers-reduced-motion: reduce) {
+  .confetti { display: none; }
 }
 .zoom {
   position: fixed; inset: 0; z-index: 100;

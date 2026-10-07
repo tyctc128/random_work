@@ -1,13 +1,23 @@
 // 奧特曼揭牌抽籤 — 純前端靜態網站（GitHub Pages 友善，相對路徑）
-// 撕牌動作 v5：奧特曼站在黑板左邊，用胸口高度伸向黑板的那隻手（去背疊圖、手腕為軸）跟著每一撕「捏→上抬→下擺→彈回」；
+// 撕牌動作 v6：抽籤的整隻手臂以肩膀為軸，手肘連動，跟著每一撕「抬臂→下拉→收回」。
 // 上方扶黑板的手不動。畫面是一疊作品紙，每一抽他捏住紙緣（支點：桌機左緣中段、手機卡片上緣 86%）
 // 把最上面那整張作品往他身體方向（左下）扯下、甩出畫面，露出下一張；最後留下的就是中籤作品。
 
 // 內建作品清單：檔名以相對路徑引用，確保在 /reponame/ 子路徑下也能載入
+// 同一作品只列一次，避免增加其中籤機率。人工比對後排除以下不同版本：
+// 558988_0.jpg = art1-traffic.jpg；558989_0.jpg = art2-star.jpg；558992_0.jpg = art3-sweet.jpg。
 const ARTWORKS = [
   { src: "artworks/art1-traffic.jpg", name: "交通王國 · 小天" },
   { src: "artworks/art2-star.jpg",    name: "星星王國 · 小全" },
   { src: "artworks/art3-sweet.jpg",   name: "可愛甜美王國 · 小喬" },
+  { src: "artworks/558990_0.jpg", name: "宇宙王國" },
+  { src: "artworks/558991_0.jpg", name: "星光王國" },
+  { src: "artworks/558993_0.jpg", name: "黃金珍珠王國" },
+  { src: "artworks/558994_0.jpg", name: "海上王國" },
+  { src: "artworks/558995_0.jpg", name: "名偵探柯南王國" },
+  { src: "artworks/558996_0.jpg", name: "王國作品 · 558996" }, // 手寫標題待確認，暫用檔案編號
+  { src: "artworks/558997_0.jpg", name: "海洋王國" },
+  { src: "artworks/558998.jpg", name: "可愛寶王國" },
 ];
 
 const wrap       = document.querySelector(".wrap");
@@ -20,7 +30,8 @@ const startBtn   = document.getElementById("startBtn");
 const resetBtn   = document.getElementById("resetBtn");
 const sheets     = Array.from(document.querySelectorAll(".sheet"));   // 3 reusable layers
 const shards     = Array.from(document.querySelectorAll(".shard"));   // 3 reusable scraps
-const handEl     = document.getElementById("hand");                     // v3 cut-out hand overlay
+const armEl      = document.getElementById("arm");
+const forearmEl  = document.getElementById("forearm");
 const controlsEl = document.querySelector(".controls");
 const zoomEl     = document.getElementById("zoom");                     // winner lightbox
 const zoomImg    = document.getElementById("zoomImg");
@@ -30,14 +41,14 @@ const reduceMQ = window.matchMedia ? window.matchMedia("(prefers-reduced-motion:
 const reduceMotion = () => !!(reduceMQ && reduceMQ.matches);
 const canAnimate = typeof Element !== "undefined" && typeof Element.prototype.animate === "function";
 
-// ── rhythm (total ≈ 3.2 s) ───────────────────────────────────────────────
+// ── rhythm (total ≈ 4.8 s) ───────────────────────────────────────────────
 const TEARS     = 8;     // sheets torn per draw (top sheet + 7 fillers; winner is always last)
-const FINAL_D   = 520;   // the heavy final rip
+const FINAL_D   = 760;   // let the whole-arm final pull read clearly
 const PAUSE_MS  = 400;   // tense pause (corner jitter) before the final rip
 const REVEAL_MS = 250;   // winner revealed → wait → badge pops + name fades in
-// pre-final tear durations: 180ms → … → 550ms (second-to-last), progressively slower
+// pre-final tear durations: 330ms → … → 600ms (second-to-last), progressively slower
 const DUR = Array.from({ length: TEARS - 1 }, (_, i) =>
-  Math.round(180 + 370 * Math.pow(i / (TEARS - 2), 3)));
+  Math.round(330 + 270 * Math.pow(i / (TEARS - 2), 3)));
 // gaps between pre-final tears: 40ms → 80ms
 const GAP = Array.from({ length: TEARS - 2 }, (_, i) =>
   Math.round(40 + 40 * Math.pow(i / (TEARS - 3), 2)));
@@ -49,6 +60,116 @@ let anims       = [];        // every running Web Animation of the current draw
 let ready       = false;     // true once all artworks are preloaded
 let winnerSheet = null;      // sheet element showing the current winner (won state)
 let winnerIdx   = -1;
+
+// ── draw audio ─────────────────────────────────────────────────────────
+// Unlock a single context in the start-button gesture; cache both decoded clips.
+let soundContext = null;
+const sounds = {
+  cheer: { url: "sound/歡呼聲.mp3", buffer: null, source: null, version: 0 },
+  paper: { url: "sound/paper.mp3", buffer: null, source: null, version: 0 },
+};
+function prepareAudio() {
+  const AudioContext = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContext) return;
+  try {
+    if (!soundContext) soundContext = new AudioContext();
+    if (soundContext.state === "suspended") soundContext.resume().catch(() => {});
+    Object.values(sounds).forEach(sound => {
+      if (!sound.buffer) {
+        sound.buffer = fetch(sound.url)
+          .then(response => {
+            if (!response.ok) throw new Error("Audio could not be loaded");
+            return response.arrayBuffer();
+          })
+          .then(bytes => soundContext.decodeAudioData(bytes))
+          .catch(() => { sound.buffer = null; return null; });
+      }
+    });
+  } catch (e) { /* unavailable audio must never block the draw */ }
+}
+function stopSound(name) {
+  const sound = sounds[name];
+  sound.version += 1;
+  if (sound.source) {
+    sound.source.onended = null;
+    sound.source.stop();
+    sound.source.disconnect();
+    sound.source = null;
+  }
+}
+function stopAudio() { Object.keys(sounds).forEach(stopSound); }
+async function playSound(name, maxDuration = Infinity) {
+  stopSound(name);
+  const sound = sounds[name], version = sound.version;
+  const requestedAt = performance.now();
+  try {
+    const buffer = await sound.buffer;
+    if (!buffer || version !== sound.version || soundContext.state !== "running") return;
+    // Skip a late paper tick instead of playing it against the next sheet.
+    if (name === "paper" && performance.now() - requestedAt > 120) return;
+    const source = soundContext.createBufferSource();
+    source.buffer = buffer;
+    source.connect(soundContext.destination);
+    source.onended = () => {
+      source.disconnect();
+      if (sound.source === source) sound.source = null;
+    };
+    sound.source = source;
+    source.start(0, 0, Math.min(buffer.duration, maxDuration));
+  } catch (e) { /* visual results remain usable if playback is unavailable */ }
+}
+
+// ── winner confetti ─────────────────────────────────────────────────────
+const confettiEl = document.getElementById("confetti");
+const confettiAnimations = new Set();
+function stopConfetti() {
+  confettiAnimations.forEach(animation => animation.cancel());
+  confettiAnimations.clear();
+  confettiEl.replaceChildren();
+  confettiEl.hidden = true;
+}
+function celebrateWinner() {
+  stopConfetti();
+  if (reduceMotion() || !canAnimate) return;
+  const rect = panel.getBoundingClientRect();
+  const colors = ["#ffd23b", "#ff557b", "#4ddfff", "#ac83ff", "#6bf0b2", "#fff3ca"];
+  const perBurst = window.innerWidth <= 640 ? 26 : 40;
+  const spread = Math.min(window.innerWidth * .6, 460);
+  confettiEl.hidden = false;
+  for (let burst = 0; burst < 3; burst++) {
+    const x = Math.max(24, Math.min(window.innerWidth - 24, rect.left + rect.width * [.2, .8, .5][burst]));
+    const y = Math.max(90, Math.min(window.innerHeight * .65, rect.top + rect.height * .35));
+    for (let i = 0; i < perBurst; i++) {
+      const piece = document.createElement("span");
+      piece.className = "confetti-piece";
+      piece.style.left = `${x}px`;
+      piece.style.top = `${y}px`;
+      piece.style.backgroundColor = colors[i % colors.length];
+      piece.style.width = `${5 + Math.random() * 5}px`;
+      piece.style.height = `${i % 3 === 0 ? 16 : 7}px`;
+      confettiEl.appendChild(piece);
+      const angle = Math.PI + Math.random() * Math.PI;
+      const dx = Math.cos(angle) * spread * (.45 + Math.random() * .55);
+      const lift = 150 + Math.abs(Math.sin(angle)) * 350;
+      const spin = (Math.random() < .5 ? -1 : 1) * (360 + Math.random() * 720);
+      const frames = Array.from({ length: 13 }, (_, frame) => {
+        const t = frame / 12;
+        const px = dx * (1 - Math.exp(-3 * t));
+        const py = -lift * t + (window.innerHeight + lift) * t * t;
+        return { offset: t, opacity: t < .7 ? 1 : (1 - t) / .3,
+          transform: `translate3d(${px}px, ${py}px, 0) rotate(${spin * t}deg) rotateY(${t * 720}deg)` };
+      });
+      const animation = piece.animate(frames, { duration: 2400 + Math.random() * 800, delay: burst * 160, fill: "both", easing: "linear" });
+      confettiAnimations.add(animation);
+      animation.onfinish = () => {
+        animation.cancel();
+        piece.remove();
+        confettiAnimations.delete(animation);
+        if (!confettiAnimations.size) confettiEl.hidden = true;
+      };
+    }
+  }
+}
 
 // 均勻亂數：優先使用 crypto，fallback 到 Math.random（已驗證公平，勿改）
 function uniformIndex(n) {
@@ -159,7 +280,6 @@ const flipX = x => (MX === 1 ? x            // no mirror: keep every value exact
   : typeof x === "number" ? x * MX
   : (x.startsWith("-") ? x.slice(1) : (parseFloat(x) === 0 ? x : "-" + x)));
 const T = (x, y, r, s, k) => `translate(${flipX(x)}, ${y}) rotate(${r * MX}deg) skewX(${s * MX}deg) scale(${k})`;
-const TENSE_END = T("-3px", "4px", -1.5, -2, 1);   // pose at the end of the pre-final pause (pulled toward his hand, barely rotated)
 
 // the stage shakes once at the moment of the rip
 function shake(heavy) {
@@ -190,95 +310,92 @@ function burst(count) {
   }
 }
 
-// ── v5: the LOWER hand (chest height, reaching to the board; pivot = wrist) ──
-// The upper hand holding the board stays in the background. This one swings around the wrist,
-// with the same d / offsets as tearSheet: pinch → lift (−16°, final −20°) → yank down hard
-// (+28°, final +35°) while the hand also drops 6% of its width (final 8%) → spring back (−5°).
-// Fingers point right, wrist on the left: rotate > 0 = fingers down, < 0 = fingers up.
-// translate % is relative to the hand box (181×78): 6% of its width ≈ 14% of its height, 8% ≈ 19%.
-// (Kept small so the background cuff doesn't read as a second, doubled cuff at the low point.)
-const H = (x, y, r) => `translate(${x}, ${y}) rotate(${r}deg)`;
-const HAND_TENSE = { y: -6, r: -12 };             // pre-final pause: lifted, holding the paper taut
-const HAND_DROP = { normal: 14, heavy: 19 };      // % of hand height ≈ 6% / 8% of hand width
-function stopHand() {
-  if (!handEl) return;
-  cancelAnims(handEl);
-  if (handEl.getAnimations) handEl.getAnimations().forEach(a => { try { a.cancel(); } catch (e) {} });
+// Shoulder is the parent joint; the forearm and palm inherit its whole-arm sweep.
+// No translation at the shoulder: the arm stays attached to the torso at every frame.
+const ARM_TENSE = -10;
+const ELBOW_TENSE = -8;
+const rotate = degrees => `rotate(${degrees}deg)`;
+function stopArm() {
+  [armEl, forearmEl].forEach(el => { if (el) cancelAnims(el); });
 }
-function handSwing(d, heavy) {
-  if (!handEl || reduceMotion()) return;
+function armSwing(d, heavy) {
+  if (!armEl || !forearmEl || reduceMotion()) return;
+  stopArm();
   const k = heavy ? 1.25 : 1;
-  const drop = heavy ? HAND_DROP.heavy : HAND_DROP.normal;
-  cancelAnims(handEl);
-  const start = heavy ? H("0%", `${HAND_TENSE.y}%`, HAND_TENSE.r) : H("0%", "0%", 0);
-  animate(handEl, [
-    { offset: 0,    transform: start },
-    { offset: 0.05, transform: H("0%", "3%", 3) },                                           // pinch the edge
-    { offset: 0.10, transform: H("0%", `${-8 * k}%`, -16 * k), easing: "cubic-bezier(.3,0,.2,1)" }, // lift it
-    { offset: 0.15, transform: H("0%", "0%", 0), easing: "cubic-bezier(.5,0,.2,1.15)" },     // start down: hard yank, slight overshoot
-    { offset: 0.25, transform: H("-3%", `${drop}%`, 28 * k), easing: "ease-out" },            // yank down + drop
-    { offset: 0.62, transform: H("-2%", `${Math.round(drop * 0.7)}%`, 20 * k) },              // stays low with the paper
-    { offset: 0.80, transform: H("0%", "-3%", -5) },                                         // spring back, overshoot up
-    { offset: 1,    transform: H("0%", "0%", 0) },
-  ], { duration: d, fill: "none" });
+  const frames = (tense, lift, pull, follow, rebound) => [
+    { offset: 0, transform: rotate(heavy ? tense : 0), easing: "ease-out" },
+    { offset: .15, transform: rotate(lift * k), easing: "cubic-bezier(.35,0,.2,1)" },
+    { offset: .38, transform: rotate(pull * k), easing: "ease-out" },
+    { offset: .62, transform: rotate(follow * k), easing: "ease-in-out" },
+    { offset: .86, transform: rotate(rebound), easing: "ease-out" },
+    { offset: 1, transform: rotate(0) },
+  ];
+  animate(armEl, frames(ARM_TENSE, -12, 27, 23, -3), { duration: d });
+  animate(forearmEl, frames(ELBOW_TENSE, -10, 12, 8, -4), { duration: d });
 }
-// pre-final pause: lift and hold the paper taut, with a ±1.5° tremble
-function handTense(ms) {
-  if (!handEl || reduceMotion()) return;
-  cancelAnims(handEl);
-  const y = HAND_TENSE.y, r = HAND_TENSE.r;
-  animate(handEl, [
-    { transform: H("0%", "0%", 0) },
-    { transform: H("0%", `${y}%`, r), offset: 0.3, easing: "ease-out" },
-    { transform: H("0%", `${y}%`, r + 1.5), offset: 0.45 },
-    { transform: H("0%", `${y}%`, r - 1.5), offset: 0.6 },
-    { transform: H("0%", `${y}%`, r + 1.5), offset: 0.75 },
-    { transform: H("0%", `${y}%`, r - 1.5), offset: 0.9 },
-    { transform: H("0%", `${y}%`, r) },
-  ], { duration: ms, fill: "forwards" });
+function armTense(ms) {
+  if (!armEl || !forearmEl || reduceMotion()) return;
+  stopArm();
+  [[armEl, ARM_TENSE], [forearmEl, ELBOW_TENSE]].forEach(([el, angle]) => {
+    animate(el, [
+      { offset: 0, transform: rotate(0), easing: "ease-out" },
+      { offset: .3, transform: rotate(angle) },
+      { offset: .45, transform: rotate(angle + .7) },
+      { offset: .6, transform: rotate(angle - .7) },
+      { offset: .75, transform: rotate(angle + .7) },
+      { offset: .9, transform: rotate(angle - .7) },
+      { offset: 1, transform: rotate(angle) },
+    ], { duration: ms, fill: "forwards" });
+  });
 }
 
 // pre-final pause: the gripped corner jitters harder and harder (tension).
 // v3: the jitter is mostly translation toward his hand (down-left) with very little
 // rotation, so the far (right) edge never lifts above the board while it tautens.
+// Track the same physical fingertip through both joints. Paper follows the grip
+// until release; pixels are scaled from the SVG to the current responsive stage.
+function gripTransform(shoulder, elbow, rotation = 0, skew = 0) {
+  const turn = (point, pivot, degrees) => {
+    const r = degrees * Math.PI / 180, c = Math.cos(r), s = Math.sin(r);
+    const x = point.x - pivot.x, y = point.y - pivot.y;
+    return { x: pivot.x + x * c - y * s, y: pivot.y + x * s + y * c };
+  };
+  const home = window.matchMedia("(max-width: 640px)").matches ? 7 : 0;
+  const finger = { x: 491, y: 491 };
+  const shoulderPivot = { x: 127, y: 267 };
+  const base = turn(finger, shoulderPivot, home);
+  const bent = turn(finger, { x: 173, y: 415 }, elbow);
+  const moved = turn(bent, shoulderPivot, shoulder + home);
+  const scale = document.querySelector(".arm-rig").getBoundingClientRect().width / 1536;
+  return T(`${(moved.x - base.x) * scale}px`, `${(moved.y - base.y) * scale}px`, rotation, skew, 1);
+}
 function tense(el, ms) {
   animate(el, [
-    { transform: T("0px", "0px", 0, 0, 1) },
-    { transform: T("2px", "2px", -0.5, -1, 1), offset: 0.12 },
-    { transform: T("-2px", "1px", -0.3, -1.5, 1), offset: 0.25 },
-    { transform: T("3px", "3px", -0.9, -2, 1), offset: 0.4 },
-    { transform: T("-3px", "2px", -0.6, -2.5, 1), offset: 0.55 },
-    { transform: T("4px", "4px", -1.3, -3, 1), offset: 0.7 },
-    { transform: T("-4px", "3px", -1, -3.5, 1), offset: 0.85 },
-    { transform: TENSE_END },
+    { offset: 0, transform: gripTransform(0, 0), easing: "ease-out" },
+    { offset: .3, transform: gripTransform(ARM_TENSE, ELBOW_TENSE, -1) },
+    { offset: .45, transform: gripTransform(ARM_TENSE + .7, ELBOW_TENSE + .7, -1) },
+    { offset: .6, transform: gripTransform(ARM_TENSE - .7, ELBOW_TENSE - .7, -1) },
+    { offset: .75, transform: gripTransform(ARM_TENSE + .7, ELBOW_TENSE + .7, -1) },
+    { offset: .9, transform: gripTransform(ARM_TENSE - .7, ELBOW_TENSE - .7, -1) },
+    { offset: 1, transform: gripTransform(ARM_TENSE, ELBOW_TENSE, -1) },
   ], { duration: ms, fill: "forwards" });
 }
 
-// one tear of the top sheet over duration d (pivot = grip corner via CSS transform-origin):
-//  0–15% grip (paper tautens + 2px jitter, almost no rotation) · 15–25% rip open (+ stage shake)
-//  25–100% pulled DOWN-LEFT toward his hand/body and out past his feet (translation leads,
-//  rotation follows), fading out over the last 20%
-//  from 15% the top + right edges turn jagged · at 25% scraps burst from those edges
-// v3 trajectory (UI/UX spec): 25% ≈ translate(-10%, 6%) rotate(-6deg) → 100% ≈ translate(-90%, 70%) rotate(-25deg)
-const RIP_EASE  = "cubic-bezier(.2,.9,.3,1)";    // 15→25%: the snap of the rip
-const PULL_EASE = "cubic-bezier(.5,0,.9,.6)";    // 25→62%: slow → fast, like being yanked away
+// 0–15%: lift together. 15–38%: whole-arm pull with the paper at the fingertip.
+// From 38%: release the sheet down-left while the arm follows through and returns.
+const PULL_EASE = "cubic-bezier(.5,0,.9,.6)";
 const FLING_EASE = "cubic-bezier(.3,.45,.75,1)"; // 62→100%: carries the speed off the stage
 function tearSheet(el, d, heavy) {
-  handSwing(d, heavy);                           // the right hand swings in sync (same d, same offsets)
-  const grip = heavy
-    ? [{ offset: 0, transform: TENSE_END },
-       { offset: 0.08, transform: T("2px", "5px", -2, -2.5, 1) },
-       { offset: 0.15, transform: T("-2%", "2.5%", -2.5, -2, 1), easing: RIP_EASE },
-       { offset: 0.25, transform: T("-12%", "8%", -7, 0, 1), easing: PULL_EASE },
-       { offset: 0.62, transform: T("-46%", "34%", -15, 0, 0.96), easing: FLING_EASE },
-       { offset: 1, transform: T("-95%", "75%", -27, 0, 0.9) }]
-    : [{ offset: 0, transform: T("0px", "0px", 0, 0, 1) },
-       { offset: 0.05, transform: T("1px", "2px", -0.5, -1, 1) },
-       { offset: 0.10, transform: T("2px", "1px", -0.8, -1.5, 1) },
-       { offset: 0.15, transform: T("-1%", "1.5%", -1.2, -1.5, 1), easing: RIP_EASE },
-       { offset: 0.25, transform: T("-10%", "6%", -6, 0, 1), easing: PULL_EASE },
-       { offset: 0.62, transform: T("-42%", "31%", -13, 0, 0.97), easing: FLING_EASE },
-       { offset: 1, transform: T("-90%", "70%", -25, 0, 0.92) }];
+  later(() => playSound("paper", d * .75 / 1000), d * .15);
+  armSwing(d, heavy);                           // shoulder and elbow pull together
+  const k = heavy ? 1.25 : 1;
+  const grip = [
+    { offset: 0, transform: heavy ? gripTransform(ARM_TENSE, ELBOW_TENSE, -1) : gripTransform(0, 0), easing: "ease-out" },
+    { offset: .15, transform: gripTransform(-12 * k, -10 * k, -2, -1.5), easing: "cubic-bezier(.35,0,.2,1)" },
+    { offset: .38, transform: gripTransform(27 * k, 12 * k, -8), easing: PULL_EASE },
+    { offset: .62, transform: T("-46%", "45%", -16, 0, .96), easing: FLING_EASE },
+    { offset: 1, transform: T("-95%", "90%", -27, 0, .9) },
+  ];
   animate(el, grip, { duration: d, fill: "forwards" });
 
   const intact = edgePoly(0), torn = edgePoly(heavy ? 5.5 : 3.2);
@@ -358,9 +475,11 @@ window.addEventListener("resize", syncControlsHeight);
 // 待機：封面紙四邊蓋滿、作品層用 hidden 藏起來（絕不清 src，避免破圖）
 function toIdle() {
   spinning = false;
+  stopAudio();
+  stopConfetti();
   clearTimers();
   cancelAnims();
-  stopHand();                                  // 重置：手的動畫全部取消，回到原位不殘留角度
+  stopArm();                                  // 重置：手的動畫全部取消，回到原位不殘留角度
   closeZoom();
   setZoomable(false);
   panel.classList.remove("spinning", "won");
@@ -386,6 +505,9 @@ function toIdle() {
 
 function startDraw() {
   if (spinning || !ready) return;
+  stopAudio();
+  stopConfetti();
+  prepareAudio();
   spinning = true;
   closeZoom();                                 // 再抽一次：放大畫面自動關閉
   setZoomable(false);
@@ -412,6 +534,7 @@ function startDraw() {
 
   // 減少動態：不撕、不震 — 封面紙淡出 → 中籤作品淡入 → 名字＋徽章
   if (reduceMotion()) {
+    playSound("paper", .35);
     const ws = free[0];
     free.slice(1).forEach(s => { s.hidden = true; });
     loadSheet(ws, winner);
@@ -464,7 +587,7 @@ function startDraw() {
     } else {
       // 最後一撕前停頓：紙角抖動加劇，然後重重一扯
       tense(el, PAUSE_MS);
-      handTense(PAUSE_MS);
+      armTense(PAUSE_MS);
       later(() => {
         tearSheet(el, FINAL_D, true);
         later(() => {
@@ -480,9 +603,10 @@ function startDraw() {
 // 收尾：只留中籤那張；已扯走的紙、碎屑、「撕牌中…」全部 display:none。
 // 等 250ms → 徽章彈出 → 名字這時才淡入（名字只在這裡寫入）。
 function finishDraw(winner, winEl) {
+  stopSound("paper");
   clearTimers();
   cancelAnims();
-  stopHand();
+  stopArm();
   sheets.forEach(s => { if (s !== winEl) { restSheet(s); s.hidden = true; } });
   restSheet(winEl);
   winEl.hidden = false;
@@ -498,6 +622,8 @@ function finishDraw(winner, winEl) {
     winnerIdx = winner;
     winEl.firstElementChild.alt = a.name;
     panel.classList.add("won");                // 徽章 🏆 中籤！ 彈出
+    playSound("cheer");                         // 結果揭曉時播放一次歡呼聲
+    celebrateWinner();
     setZoomable(true);                         // 這時才能點作品放大
     artName.textContent = a.name;              // 名字這時才出現（300ms 淡入）
     void artName.offsetWidth;
@@ -518,7 +644,7 @@ resetBtn.addEventListener("click", () => {
   toIdle();
 });
 
-// 預先載入所有作品（含解碼），載完才啟用開始按鈕（避免第一抽閃白）
+// 預先載入所有作品（含解碼），載完才啟用開始按鈕。
 function preloadArtworks() {
   let remaining = ARTWORKS.length;
   const done = () => {
